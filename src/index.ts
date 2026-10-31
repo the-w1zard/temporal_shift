@@ -1,44 +1,7 @@
-export type Unit = 'millisecond' | 'second' |  'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
-export type Density = 'minute' | 'hour' | 'day' | 'week' | 'month'
-export type Mode = 'single' | 'multi' | 'range' | 'range-min' | 'week' | 'quarter' | 'month' | 'year'
-type DateUnit = 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
-export interface Range {
-  start: Date
-  end: Date
-}
-export interface RRuleOptions {
-  freq: 'daily' | 'weekly' | 'monthly' | 'yearly'
-  interval?: number
-  count?: number
-  until?: Date
-  byDay?: number[]
-  byMonthDay?: number[]
-}
-export interface RecurringEvent extends Range {
-  rrule: RRuleOptions
-}
-export interface Conflict {
-  a: Range
-  b: Range
-  overlap: Range
-}
-interface Formatters {
-  formatDay?: (date: Date) => string
-  formatWeekday?: (date: Date) => string
-  formatMonthCaption?: (date: Date) => string
-  formatYearCaption?: (date: Date) => string
-  formatWeekNumber?: (weekNumber: number) => string
-}
-interface DisabledMatcher { before?: Date; after?: Date; dayOfWeek?: number[]; dates?: Date[]; fn?: (date: Date) => boolean }
-interface DateRange { from: Date; to?: Date }
-type DisabledMatcher2 =
-    | Date
-    | { from: Date; to?: Date }
-    | ((date: Date) => boolean)
-    | DisabledMatcher2[]
-    | DateRange ;
 
-
+// #endregion 
+//                                                                                        TEMPORAL SHIFT
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
 const TOKENS: Record<string, (d: Date) => string> = {
   YYYY: d => String(d.getFullYear()),
   YY: d => String(d.getFullYear()).slice(-2),
@@ -60,14 +23,37 @@ const TOKENS: Record<string, (d: Date) => string> = {
   dddd: d => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getDay()],
   MMM: d => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()],
   MMMM: d => ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][d.getMonth()],
+}// Same token set, but driven off UTC getters. Used by formatInTZ, since the
+// output of toTZ() is a "shifted" Date meant to be read with UTC getters only.
+const UTC_TOKENS: Record<string, (d: Date) => string> = {
+  YYYY: d => String(d.getUTCFullYear()),
+  YY: d => String(d.getUTCFullYear()).slice(-2),
+  MM: d => String(d.getUTCMonth() + 1).padStart(2, '0'),
+  M: d => String(d.getUTCMonth() + 1),
+  DD: d => String(d.getUTCDate()).padStart(2, '0'),
+  D: d => String(d.getUTCDate()),
+  HH: d => String(d.getUTCHours()).padStart(2, '0'),
+  H: d => String(d.getUTCHours()),
+  hh: d => String(d.getUTCHours() % 12 || 12).padStart(2, '0'),
+  h: d => String(d.getUTCHours() % 12 || 12),
+  mm: d => String(d.getUTCMinutes()).padStart(2, '0'),
+  m: d => String(d.getUTCMinutes()),
+  ss: d => String(d.getUTCSeconds()).padStart(2, '0'),
+  A: d => d.getUTCHours() < 12 ? 'AM' : 'PM',
+  a: d => d.getUTCHours() < 12 ? 'am' : 'pm',
+  dd: d => ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][d.getUTCDay()],
+  ddd: d => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()],
+  dddd: d => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getUTCDay()],
+  MMM: d => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()],
+  MMMM: d => ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][d.getUTCMonth()],
 }
 const FORMAT = {
-  full: { weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", },
-  dm: { month: "short", day: "numeric", },
-  dmy: { year: "numeric", month: "short", day: "numeric", },
-  dmyw: { weekday: "short", year: "numeric", month: "short", day: "numeric", },
-  t: { hour: "2-digit", minute: "2-digit", }
-}
+  full: { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' },
+  dm: { month: 'short', day: 'numeric' },
+  dmy: { year: 'numeric', month: 'short', day: 'numeric' },
+  dmyw: { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' },
+  t: { hour: '2-digit', minute: '2-digit' },
+} as const
 const UNITS: Record<string, DateUnit> = {
   ms: 'millisecond', millisecond: 'millisecond', milliseconds: 'millisecond',
   s: 'second', sec: 'second', second: 'second', seconds: 'second',
@@ -93,22 +79,33 @@ const MONTHS: Record<string, number> = {
   july: 6, jul: 6, august: 7, aug: 7, september: 8, sep: 8,
   october: 9, oct: 9, november: 10, nov: 10, december: 11, dec: 11,
 }
-
-
-
-
+// #endregion 
+//                                                                      core parse / format / arithmetic
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
 export function parse(input: string | number | Date, tz?: string): Date {
   if (input instanceof Date) return tz ? toTZ(input, tz) : new Date(input)
   if (typeof input === 'number') return new Date(input)
   const d = new Date(input)
   if (!isNaN(d.getTime())) return tz ? toTZ(d, tz) : d
   throw new Error(`temporalShift.parse: cannot parse "${input}"`)
+}/** Non-throwing variant of parse(). Returns null instead of throwing on bad input. */
+export function tryParse(input: string | number | Date, tz?: string): Date | null {
+  try { return parse(input, tz) } catch { return null }
 }
 export function format(date: Date, template: string): string {
   const keys = Object.keys(TOKENS).sort((a, b) => b.length - a.length)
   let out = template
   for (const k of keys) out = out.split(k).join(TOKENS[k](date))
   return out
+}/** Like format(), but reads the date with UTC getters — pair with toTZ()'s output. */
+function formatUTC(date: Date, template: string): string {
+  const keys = Object.keys(UTC_TOKENS).sort((a, b) => b.length - a.length)
+  let out = template
+  for (const k of keys) out = out.split(k).join(UTC_TOKENS[k](date))
+  return out
+}/** Format an absolute instant as wall-clock time in `tz`, in one call. */
+export function formatInTZ(date: Date, template: string, tz: string): string {
+  return formatUTC(toTZ(date, tz), template)
 }
 export function add(date: Date, amount: number, unit: Unit): Date {
   const d = new Date(date)
@@ -174,22 +171,50 @@ export function endOf(date: Date, unit: Density): Date {
   }
   return d
 }
-export function toTZ(date: Date, tz: string): Date {
-  return new Date(date.toLocaleString('en-US', { timeZone: tz }))
-}
-export function fromTZ(date: Date, tz: string): Date {
-  const local = new Date(date.toLocaleString('en-US', { timeZone: tz }))
-  const delta = date.getTime() - local.getTime()
-  return new Date(date.getTime() + delta)
-}
+// #endregion 
+//                                                                                              timezone
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
+/* ─────────────────────────  ─────────────────────────
+ * No Temporal dependency, so this computes real offsets via Intl and shifts
+ * the Date's underlying timestamp. The result is only safe to read with
+ * getUTC*() methods (or formatInTZ/formatUTC) — NOT getHours()/getDate(),
+ * which fall back to the *system's* local timezone, not `tz`.
+ */
+function tzOffsetMinutes(date: Date, tz: string): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+  const parts = Object.fromEntries(dtf.formatToParts(date).map(p => [p.type, p.value])) as Record<string, string>
+  const asUTC = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour), Number(parts.minute), Number(parts.second),
+  )
+  return (asUTC - date.getTime()) / 60000
+}/** Offset in minutes such that (local wall time) = (UTC) + offset. */
 export function tzOffset(tz: string, date: Date = new Date()): number {
-  const utc = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }))
-  const local = new Date(date.toLocaleString('en-US', { timeZone: tz }))
-  return (local.getTime() - utc.getTime()) / 60000
+  return tzOffsetMinutes(date, tz)
+}/** Shift `date` so its UTC getters read as wall-clock time in `tz`. Read with getUTC*() only. */
+export function toTZ(date: Date, tz: string): Date {
+  return new Date(date.getTime() + tzOffsetMinutes(date, tz) * 60000)
+}/** Inverse of toTZ: given a Date whose UTC fields are a wall-clock time meant for `tz`, return the real instant. */
+export function fromTZ(date: Date, tz: string): Date {
+  let guess = date.getTime()
+  // Two passes resolves almost all DST-boundary cases; a Temporal migration removes this entirely.
+  for (let i = 0; i < 2; i++) {
+    const offset = tzOffsetMinutes(new Date(guess), tz)
+    guess = date.getTime() - offset * 60000
+  }
+  return new Date(guess)
 }
 export function localTZ(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
+// #endregion 
+//                                                                                    ranges / conflicts
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
 export function overlaps(a: Range, b: Range): boolean {
   return a.start < b.end && a.end > b.start
 }
@@ -210,6 +235,12 @@ export function findConflicts(events: Range[]): Conflict[] {
   }
   return out
 }
+export function isDateInRange(date: Date, range: Range): boolean {
+  return date >= range.start && date <= range.end
+}
+// #endregion 
+//                                                                           relative / natural language
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
 export function relative(date: Date, from: Date = new Date()): string {
   const ms = date.getTime() - from.getTime()
   const abs = Math.abs(ms)
@@ -242,12 +273,10 @@ export function parseNatural(input: string, from: Date = new Date()): Date {
   const MONTHS_LONG = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
   const MONTHS_SHORT = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
-
   if (s === 'today') return startOf(d, 'day')
   if (s === 'tomorrow') return startOf(add(d, 1, 'day'), 'day')
   if (s === 'yesterday') return startOf(sub(d, 1, 'day'), 'day')
   if (s === 'now') return d
-  // "next week" / "last week" / "next month" / "last month" / "next quarter"
   if (s === 'next week') return startOf(add(d, 1, 'week'), 'week')
   if (s === 'last week') return startOf(sub(d, 1, 'week'), 'week')
   if (s === 'next month') return startOf(add(d, 1, 'month'), 'month')
@@ -257,7 +286,6 @@ export function parseNatural(input: string, from: Date = new Date()): Date {
   if (s === 'this week') return startOf(d, 'week')
   if (s === 'this month') return startOf(d, 'month')
 
-  // "next monday" / "last friday"
   const nextDay = s.match(/^(next|last)\s+(\w+)$/)
   if (nextDay) {
     const dir = nextDay[1] === 'next' ? 1 : -1
@@ -269,28 +297,24 @@ export function parseNatural(input: string, from: Date = new Date()): Date {
       return startOf(add(d, dir * Math.abs(delta), 'day'), 'day')
     }
   }
-  // "in 2 hours", "in 30 minutes"
   const inMatch = s.match(/^in\s+(\d+(?:\.\d+)?)\s+(\w+)$/)
   if (inMatch) {
     const amount = parseFloat(inMatch[1])
     const unit = UNITS[inMatch[2]]
     if (unit) return add(d, amount, unit)
   }
-  // "2 hours ago", "30 minutes ago"
   const agoMatch = s.match(/^(\d+(?:\.\d+)?)\s+(\w+)\s+ago$/)
   if (agoMatch) {
     const amount = parseFloat(agoMatch[1])
     const unit = UNITS[agoMatch[2]]
     if (unit) return add(d, -amount, unit)
   }
-  // "every day at 9am", "next monday at 3pm"
   const nextMatch = s.match(/^next\s+(\w+)(?:\s+at\s+(\d+)(?::(\d+))?\s*(am|pm)?)?$/)
   if (nextMatch) {
     const day = WEEKDAYS[nextMatch[1]]
     if (day !== undefined) {
-    //  const d: any = new Date(d)
-      const diff = (day - d.getDay() + 7) % 7 || 7
-      d.setDate(d.getDate() + diff)
+      const diffDaysAhead = (day - d.getDay() + 7) % 7 || 7
+      d.setDate(d.getDate() + diffDaysAhead)
       if (nextMatch[2]) {
         let h = parseInt(nextMatch[2])
         const m = parseInt(nextMatch[3] ?? '0')
@@ -301,38 +325,35 @@ export function parseNatural(input: string, from: Date = new Date()): Date {
       return d
     }
   }
-  // "at 9am", "at 14:30"
+  // "at 9am", "at 14:30" — FIX: roll to tomorrow only if the resolved time
+  // has already passed *relative to `from`*, not compared against itself.
   const atMatch = s.match(/^at\s+(\d+)(?::(\d+))?\s*(am|pm)?$/)
   if (atMatch) {
-   // const d: any = new Date(d)
     let h = parseInt(atMatch[1])
     const m = parseInt(atMatch[2] ?? '0')
     if (atMatch[3] === 'pm' && h < 12) h += 12
     if (atMatch[3] === 'am' && h === 12) h = 0
-    d.setHours(h, m, 0, 0)
-    if (d <= d) d.setDate(d.getDate() + 1)
-    return d
+    const result = new Date(d)
+    result.setHours(h, m, 0, 0)
+    if (result <= from) result.setDate(result.getDate() + 1)
+    return result
   }
-  // "january 15", "jan 15 2026"
   const monthDayMatch = s.match(/^(\w+)\s+(\d+)(?:\s+(\d{4}))?$/)
   if (monthDayMatch) {
     const mo = MONTHS[monthDayMatch[1]]
     if (mo !== undefined) {
-     // const d: any = new Date(d)
       d.setMonth(mo, parseInt(monthDayMatch[2]))
       if (monthDayMatch[3]) d.setFullYear(parseInt(monthDayMatch[3]))
       d.setHours(0, 0, 0, 0)
       return d
     }
   }
-  // "in 3 days" / "3 days ago" / "2 weeks ago" / "in 1 hour"
   const rel = s.match(/^(in\s+)?(\d+)\s+(minute|hour|day|week|month|year)s?\s*(ago)?$/)
   if (rel) {
     const amt = parseInt(rel[2])
     const unit = rel[3] as Unit
     return rel[4] ? sub(d, amt, unit) : add(d, amt, unit)
   }
-  // "march 15" / "mar 15" / "15 march"
   for (let i = 0; i < 12; i++) {
     const long = MONTHS_LONG[i]
     const short = MONTHS_SHORT[i]
@@ -353,6 +374,12 @@ export function parseNatural(input: string, from: Date = new Date()): Date {
 
   throw new Error(`temporalShift.parseNatural: cannot parse "${input}"`)
 }
+export function tryParseNatural(input: string, from: Date = new Date()): Date | null {
+  try { return parseNatural(input, from) } catch { return null }
+}
+// #endregion 
+//                                                                                     recurrence / load
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
 export function expandRecurring(event: RecurringEvent, viewStart: Date, viewEnd: Date): Range[] {
   const { start, end, rrule } = event
   const duration = end.getTime() - start.getTime()
@@ -394,44 +421,70 @@ export function weekLoad(events: Range[], weekStart: Date): number {
   }, 0)
 }
 export function snapToSlot(date: Date, minutes: number): Date {
-  const d = new Date(date);
-  const m = d.getMinutes();
-  d.setMinutes(Math.round(m / minutes) * minutes, 0, 0);
-  return d;
+  const d = new Date(date)
+  const m = d.getMinutes()
+  d.setMinutes(Math.round(m / minutes) * minutes, 0, 0)
+  return d
 }
 export function durationLabel(ms: number): string {
-  const m = Math.round(ms / 60000);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  return rem ? `${h}h ${rem}m` : `${h}h`;
+  const m = Math.round(ms / 60000)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  const rem = m % 60
+  return rem ? `${h}h ${rem}m` : `${h}h`
 }
-export function isTravelDay(eventA: Range & { city?: string }, eventB: Range & { city?: string }): boolean { if (!eventA.city || !eventB.city) return false; return eventA.city.toLowerCase() !== eventB.city.toLowerCase() && isSameDay(eventA.start, eventB.start); }
-export function isSameDay(a: Date, b: Date): boolean { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate() }
+export function isTravelDay(eventA: Range & { city?: string }, eventB: Range & { city?: string }): boolean {
+  if (!eventA.city || !eventB.city) return false
+  return eventA.city.toLowerCase() !== eventB.city.toLowerCase() && isSameDay(eventA.start, eventB.start)
+}
+// #endregion 
+//                                                                                  comparisons / basics
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
+export function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
 export function isSameWeek(a: Date, b: Date): boolean { return isSameDay(startOf(a, 'week'), startOf(b, 'week')) }
 export function isSameMonth(a: Date, b: Date): boolean { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() }
-export function isWeekend(date: Date): boolean { const d = date.getDay(); return d === 0 || d === 6; }
+export function isSameHour(a: Date, b: Date): boolean { return isSameDay(a, b) && a.getHours() === b.getHours() }
+export function isSameMinute(a: Date, b: Date): boolean { return isSameHour(a, b) && a.getMinutes() === b.getMinutes() }
+export function isWeekend(date: Date): boolean { const d = date.getDay(); return d === 0 || d === 6 }
+export function isLeapYear(year: number): boolean { return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 }
 export function daysInMonth(year: number, month: number): number { return new Date(year, month + 1, 0).getDate() }
-export function clamp(date: Date, min: Date, max: Date): Date { if (date < min) return min; if (date > max) return max; return date; }
+export function clamp(date: Date, min: Date, max: Date): Date { if (date < min) return min; if (date > max) return max; return date }
 export function startOfDay(d: Date): Date { return new Date(d.getFullYear(), d.getMonth(), d.getDate()) }
 export function startOfMonth(d: Date): Date { return new Date(d.getFullYear(), d.getMonth(), 1) }
 export function endOfMonth(d: Date): Date { return new Date(d.getFullYear(), d.getMonth() + 1, 0) }
 export function startOfWeek(d: Date, weekStartsOn: number): Date {
   const result = new Date(d)
   const day = result.getDay()
-  const diff = (day - weekStartsOn + 7) % 7
-  result.setDate(result.getDate() - diff)
+  const diffDaysBack = (day - weekStartsOn + 7) % 7
+  result.setDate(result.getDate() - diffDaysBack)
   return result
 }
 export function addDays(d: Date, n: number): Date { const r = new Date(d); r.setDate(r.getDate() + n); return r }
 export function addMonths(d: Date, n: number): Date { const r = new Date(d); r.setMonth(r.getMonth() + n); return r }
 export function subMonths(d: Date, n: number): Date { const r = new Date(d); r.setMonth(r.getMonth() - n); return r }
 export function diffDays(a: Date, b: Date): number { return Math.round((startOfDay(b).getTime() - startOfDay(a).getTime()) / 86400000) }
+export function getDaysBetween(a: Date, b: Date): number { return Math.abs(diffDays(a, b)) }
 export function getWeekNumber(d: Date): number {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
   date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7))
   const y = new Date(Date.UTC(date.getUTCFullYear(), 0, 1))
   return Math.ceil((((date.getTime() - y.getTime()) / 86400000) + 1) / 7)
+}
+export function getWeekOfMonth(date: Date, weekStartsOn = 0): number {
+  const firstWeekStart = startOfWeek(startOfMonth(date), weekStartsOn)
+  return Math.floor(diffDays(firstWeekStart, date) / 7) + 1
+}
+export function getDaysInWeek(date: Date, weekStartsOn = 0): Date[] {
+  const start = startOfWeek(date, weekStartsOn)
+  return Array.from({ length: 7 }, (_, i) => addDays(start, i))
+}
+export function getMonthName(date: Date, locale = 'en-US', format: 'long' | 'short' = 'long'): string {
+  return new Intl.DateTimeFormat(locale, { month: format }).format(date)
+}
+export function getDayName(date: Date, locale = 'en-US', format: 'long' | 'short' = 'long'): string {
+  return new Intl.DateTimeFormat(locale, { weekday: format }).format(date)
 }
 export function getWeekDays(weekStartsOn: number, locale: string): string[] {
   const base = new Date(2024, 0, 7 + weekStartsOn)
@@ -439,6 +492,57 @@ export function getWeekDays(weekStartsOn: number, locale: string): string[] {
     new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(addDays(base, i))
   )
 }
+export function getQuarter(date: Date): number { return Math.floor(date.getMonth() / 3) }
+export function quarterStart(year: number, quarter: number): Date { return new Date(year, quarter * 3, 1) }
+export function quarterEnd(year: number, quarter: number): Date { return endOfMonth(new Date(year, quarter * 3 + 2, 1)) }
+export function getLocaleWeekStart(): number {
+  try {
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale
+    const sundayLocales = ['en-US', 'en-CA', 'en-AU', 'zh', 'ja', 'ko', 'ar', 'he', 'fa']
+    return sundayLocales.some(l => locale.startsWith(l.split('-')[0])) ? 0 : 1
+  } catch { return 0 }
+}/* ───────────────────────── ISO / locale strings ───────────────────────── */
+// #endregion 
+//                                                                      calendar grid / picker selection
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
+const ISO_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/
+export function parseISO(str: string): Date {
+  if (!ISO_RE.test(str)) throw new Error(`temporalShift.parseISO: "${str}" is not a valid ISO 8601 string`)
+  const d = new Date(str)
+  if (isNaN(d.getTime())) throw new Error(`temporalShift.parseISO: invalid ISO string "${str}"`)
+  return d
+}
+export function formatISO(date: Date, opts: { dateOnly?: boolean } = {}): string {
+  const iso = date.toISOString()
+  return opts.dateOnly ? iso.slice(0, 10) : iso
+}
+export function toLocalString(date: Date, opts: Intl.DateTimeFormatOptions = FORMAT.full, locale = 'en-US'): string {
+  return date.toLocaleString(locale, opts)
+}
+// #endregion 
+//                                                                      disabled-date matching (unified)
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
+export function matchesDisabled(d: Date, matcher?: DateMatcher): boolean {
+  if (!matcher) return false
+  if (Array.isArray(matcher)) return matcher.some(m => matchesDisabled(d, m))
+  if (typeof matcher === 'function') return matcher(d)
+  if (matcher instanceof Date) return isSameDay(d, matcher)
+  if ('from' in matcher) {
+    const from = startOfDay(matcher.from)
+    const to = matcher.to ? startOfDay(matcher.to) : from
+    const day = startOfDay(d)
+    return day >= from && day <= to
+  }
+  if (matcher.before && d < matcher.before) return true
+  if (matcher.after && d > matcher.after) return true
+  if (matcher.dayOfWeek?.includes(d.getDay())) return true
+  if (matcher.dates?.some(x => isSameDay(x, d))) return true
+  if (matcher.fn?.(d)) return true
+  return false
+}
+// #endregion 
+//                                                                      calendar grid / picker selection
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
 export function getMonthGrid(month: Date, weekStartsOn: number, fixedWeeks: boolean): Date[][] {
   const first = startOfMonth(month)
   const last = endOfMonth(month)
@@ -455,28 +559,9 @@ export function getMonthGrid(month: Date, weekStartsOn: number, fixedWeeks: bool
   }
   return weeks
 }
-export function getQuarter(date: Date): number { return Math.floor(date.getMonth() / 3) }
-export function quarterStart(year: number, quarter: number): Date { return new Date(year, quarter * 3, 1) }
-export function quarterEnd(year: number, quarter: number): Date { return endOfMonth(new Date(year, quarter * 3 + 2, 1)) }
-export function getLocaleWeekStart(): number {
-  try {
-    const locale = Intl.DateTimeFormat().resolvedOptions().locale
-    const sundayLocales = ['en-US', 'en-CA', 'en-AU', 'zh', 'ja', 'ko', 'ar', 'he', 'fa']
-    return sundayLocales.some(l => locale.startsWith(l.split('-')[0])) ? 0 : 1
-  } catch { return 0 }
-}
-export function ToLocalString(v: any = FORMAT.full) {
-  return new Date(v).toLocaleString("en-US", v)
-}
-export function isDateDisabled(date: Date, disabled?: DisabledMatcher | Date[]): boolean {
-  if (!disabled) return false
-  if (Array.isArray(disabled)) return disabled.some(d => isSameDay(d, date))
-  if (disabled.before && date < disabled.before) return true
-  if (disabled.after && date > disabled.after) return true
-  if (disabled.dayOfWeek?.includes(date.getDay())) return true
-  if (disabled.dates?.some(d => isSameDay(d, date))) return true
-  if (disabled.fn?.(date)) return true
-  return false
+export function sortDates(dates: Date[], order: 'asc' | 'desc' = 'asc'): Date[] {
+  const sorted = [...dates].sort((a, b) => a.getTime() - b.getTime())
+  return order === 'asc' ? sorted : sorted.reverse()
 }
 export function resolveSelection(
   date: Date,
@@ -485,7 +570,7 @@ export function resolveSelection(
   min?: number,
   max?: number,
   excludeDisabled?: boolean,
-  disabled?: DisabledMatcher | Date[],
+  disabled?: DateMatcher,
 ): any {
   if (mode === 'single') return date
   if (mode === 'multi') {
@@ -500,7 +585,7 @@ export function resolveSelection(
     const days: Date[] = []
     for (let i = 0; i < 7; i++) {
       const d = addDays(ws, i)
-      if (excludeDisabled && isDateDisabled(d, disabled)) continue
+      if (excludeDisabled && matchesDisabled(d, disabled)) continue
       days.push(d)
     }
     return { from: days[0], to: days[days.length - 1] }
@@ -562,77 +647,91 @@ export function defaultFormatters(locale: string): Formatters {
     formatWeekNumber: (n) => String(n),
   }
 }
-
-export function matchesDisabled(
-    d: Date,
-    matcher: DisabledMatcher2 | undefined
-): boolean {
-    if (!matcher) return false;
-    if (Array.isArray(matcher)) return matcher.some(m => matchesDisabled(d, m));
-    if (typeof matcher === 'function') return matcher(d);
-    if (matcher instanceof Date) return isSameDay(d, matcher);
-    if ('from' in matcher) {
-        const from = startOfDay(matcher.from);
-        const to = matcher.to ? startOfDay(matcher.to) : from;
-        const day = startOfDay(d);
-        return day >= from && day <= to;
-    }
-    return false;
-}
+// #endregion 
+//                                                                                            DEPRECATED
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
+/** @deprecated use getMonthGrid(new Date(year, month, 1), weekStartsOn, true) — kept as a thin alias. */
 export function buildMonth(year: number, month: number, weekStartsOn: number): Date[][] {
-  const firstDay = new Date(year, month, 1)
-  const start = startOf(firstDay, 'week')
-  const weeks: Date[][] = []
-  let cursor = new Date(start)
-  cursor.setDate(cursor.getDate() - cursor.getDay() + weekStartsOn)
-  if (cursor > firstDay) cursor.setDate(cursor.getDate() - 7)
-  for (let w = 0; w < 6; w++) {
-    const week: Date[] = []
-    for (let d = 0; d < 7; d++) {
-      week.push(new Date(cursor))
-      cursor.setDate(cursor.getDate() + 1)
+  return getMonthGrid(new Date(year, month, 1), weekStartsOn, true)
+}
+/** @deprecated alias of matchesDisabled — kept for backward compatibility. */
+export const isDateDisabled = matchesDisabled
+
+// #endregion 
+//                                                                                                 TYPES
+// #region ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+export interface Range {
+  start: Date
+  end: Date
+}
+export interface RRuleOptions {
+  freq: 'daily' | 'weekly' | 'monthly' | 'yearly'
+  interval?: number
+  count?: number
+  until?: Date
+  byDay?: number[]
+  byMonthDay?: number[]
+}
+export interface RecurringEvent extends Range {
+  rrule: RRuleOptions
+}
+export interface Conflict {
+  a: Range
+  b: Range
+  overlap: Range
+}
+interface Formatters {
+  formatDay?: (date: Date) => string
+  formatWeekday?: (date: Date) => string
+  formatMonthCaption?: (date: Date) => string
+  formatYearCaption?: (date: Date) => string
+  formatWeekNumber?: (weekNumber: number) => string
+}
+interface DisabledMatcher { before?: Date; after?: Date; dayOfWeek?: number[]; dates?: Date[]; fn?: (date: Date) => boolean }
+interface DateRange { from: Date; to?: Date }
+type DisabledMatcher2 =
+    | Date
+    | { from: Date; to?: Date }
+    | ((date: Date) => boolean)
+    | DisabledMatcher2[]
+    | DateRange ;
+    export type Unit = 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
+    export type Density = 'minute' | 'hour' | 'day' | 'week' | 'month'
+    export type Mode = 'single' | 'multi' | 'range' | 'range-min' | 'week' | 'quarter' | 'month' | 'year'
+    type DateUnit = 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
+    export interface Range {
+      start: Date
+      end: Date
     }
-    weeks.push(week)
-    if (cursor.getMonth() !== month && w >= 3) break
-  }
-  return weeks
-}
-/** ───────── NEED TO DO ──────────────── */
-export function isDateInRange(date: any, range: any) {
-
-}
-export function sortDates(dates: any) {
-
-}
-export function parseISO(str: any) {
-
-}
-export function formatISO(date: any) {
-
-}
-export function isLeapYear(year: any) {
-
-}
-export function getDaysBetween(year: any) {
-
-}
-export function isSameHour(year: any) {
-
-}
-export function isSameMinute(year: any) {
-
-}
-export function getWeekOfMonth(year: any) {
-
-}
-export function getDaysInWeek(year: any) {
-
-}
-export function getMonthName(year: any) {
-
-}
-export function getDayName(year: any) {
-
-}
-
-
+    export interface RRuleOptions {
+      freq: 'daily' | 'weekly' | 'monthly' | 'yearly'
+      interval?: number
+      count?: number
+      until?: Date
+      byDay?: number[]
+      byMonthDay?: number[]
+    }
+    export interface RecurringEvent extends Range {
+      rrule: RRuleOptions
+    }
+    export interface Conflict {
+      a: Range
+      b: Range
+      overlap: Range
+    }
+    interface Formatters {
+      formatDay?: (date: Date) => string
+      formatWeekday?: (date: Date) => string
+      formatMonthCaption?: (date: Date) => string
+      formatYearCaption?: (date: Date) => string
+      formatWeekNumber?: (weekNumber: number) => string
+    }
+    export type DateMatcher =
+      | Date
+      | { from: Date; to?: Date }
+      | { before?: Date; after?: Date; dayOfWeek?: number[]; dates?: Date[]; fn?: (date: Date) => boolean }
+      | ((date: Date) => boolean)
+      | DateMatcher[]
+    
+      // #endregion 
